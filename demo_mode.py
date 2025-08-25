@@ -10,6 +10,8 @@ from ultralytics import YOLO
 import time
 from pathlib import Path
 import sys
+import mss
+import pyautogui
 
 # Import configuration
 try:
@@ -26,6 +28,9 @@ class FruitDetectionDemo:
         self.model = None
         self.is_running = False
         self.confidence_threshold = CONFIDENCE_THRESHOLD
+        
+        # Initialize mss for fast screenshots
+        self.sct = mss.mss()
         
         # Load the trained model
         self.load_model()
@@ -125,9 +130,9 @@ class FruitDetectionDemo:
         print("Press 'q' to quit, 's' to save current frame")
         print()
         
-        # Get screen dimensions
-        import pyautogui
-        screen_width, screen_height = pyautogui.size()
+        # Get screen dimensions using mss
+        monitor = self.sct.monitors[1]  # Primary monitor
+        screen_width, screen_height = monitor['width'], monitor['height']
         print(f"🖥️ Screen resolution: {screen_width}x{screen_height}")
         
         # Ask user for demo region
@@ -141,6 +146,7 @@ class FruitDetectionDemo:
         print("Move mouse to top-left corner of the test area, then press Enter")
         input("Position mouse at top-left corner and press Enter...")
         
+        # Get mouse position using pyautogui (still needed for mouse position)
         top_left = pyautogui.position()
         print(f"Top-left position: {top_left}")
         
@@ -156,7 +162,7 @@ class FruitDetectionDemo:
         width = abs(bottom_right.x - top_left.x)
         height = abs(bottom_right.y - top_left.y)
         
-        demo_region = (x, y, width, height)
+        demo_region = {'left': x, 'top': y, 'width': width, 'height': height}
         print(f"✅ Demo region set to: {demo_region}")
         
         print("\n🚀 Starting demo... Press 'q' to quit")
@@ -166,10 +172,12 @@ class FruitDetectionDemo:
         
         while True:
             try:
-                # Capture screen region
-                screenshot = pyautogui.screenshot(region=demo_region)
+                # Capture screen region using mss (much faster than pyautogui)
+                screenshot = self.sct.grab(demo_region)
                 frame = np.array(screenshot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                
+                # Convert from BGRA to BGR for OpenCV
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
                 
                 # Detect fruits
                 detections = self.detect_fruits(frame)
