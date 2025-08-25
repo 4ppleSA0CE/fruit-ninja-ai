@@ -258,6 +258,13 @@ runs/
 *.pkl
 *.joblib
 
+# Allow trained models to be versioned
+!trained_models/
+!trained_models/**
+!trained_models/*.pt
+!trained_models/*.onnx
+!trained_models/*.torchscript
+
 # Dataset and cache files
 dataset/
 labels/
