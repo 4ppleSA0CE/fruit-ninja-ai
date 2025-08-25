@@ -1,47 +1,321 @@
+#!/usr/bin/env python3
+"""
+Fruit Ninja AI Auto-Player
+Uses trained YOLO model to detect fruits and automatically slice them
+"""
+
 import pyautogui
 import cv2
 import numpy as np
 from ultralytics import YOLO
+import time
+import threading
+from pathlib import Path
+import sys
 
-# Load the trained YOLO model
-model = YOLO("path/to/your/trained_model.pt")
+# Import configuration
+try:
+    from config import *
+except ImportError:
+    print("⚠️ config.py not found, using default settings")
+    # Default fallback values
+    MODEL_PATH = "trained_models/best_fruit_detection_v11n.pt"
+    CONFIDENCE_THRESHOLD = 0.3
+    MOUSE_MOVE_DURATION = 0.05
+    MOUSE_DRAG_DURATION = 0.1
+    SLICE_DISTANCE = 20
+    MIN_DETECTION_INTERVAL = 0.1
+    FRAME_DISPLAY_INTERVAL = 30
+    SCREEN_CAPTURE_DELAY = 0.01
+    SHOW_DEBUG_WINDOW = True
+    VERBOSE_LOGGING = True
 
-# Define the region of the game screen to capture (adjust as needed)
-region = (100, 100, 800, 600)  # (x, y, width, height)
+# Safety: Move mouse to corner to stop
+pyautogui.FAILSAFE = ENABLE_FAILSAFE if 'ENABLE_FAILSAFE' in locals() else True
+pyautogui.PAUSE = MOUSE_PAUSE if 'MOUSE_PAUSE' in locals() else 0.01
 
-while True:
-    # Capture the game screen
-    screenshot = pyautogui.screenshot(region=region)
-    frame = np.array(screenshot)  # Convert to NumPy array
-    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # Convert to OpenCV format
+class FruitNinjaAI:
+    def __init__(self):
+        self.model = None
+        self.is_running = False
+        self.game_region = None
+        self.confidence_threshold = CONFIDENCE_THRESHOLD
+        self.last_detection_time = 0
+        self.min_detection_interval = MIN_DETECTION_INTERVAL
+        
+        # Load the trained model
+        self.load_model()
+        
+        # Initialize mouse control
+        self.setup_mouse_control()
+    
+    def load_model(self):
+        """Load the trained YOLO model."""
+        try:
+            model_path = Path(MODEL_PATH)
+            if not model_path.exists():
+                print(f"❌ Model not found at: {model_path}")
+                print("Please make sure you have trained a model first.")
+                sys.exit(1)
+            
+            print(f"📥 Loading model: {model_path}")
+            self.model = YOLO(str(model_path))
+            print("✅ Model loaded successfully!")
+            print(f"🎯 Confidence threshold: {self.confidence_threshold}")
+            
+        except Exception as e:
+            print(f"❌ Error loading model: {e}")
+            sys.exit(1)
+    
+    def setup_mouse_control(self):
+        """Setup mouse control parameters."""
+        # Get screen dimensions
+        screen_width, screen_height = pyautogui.size()
+        print(f"🖥️ Screen resolution: {screen_width}x{screen_height}")
+        
+        # Default game region (center of screen, adjust as needed)
+        game_width = DEFAULT_GAME_WIDTH if 'DEFAULT_GAME_WIDTH' in locals() else 800
+        game_height = DEFAULT_GAME_HEIGHT if 'DEFAULT_GAME_HEIGHT' in locals() else 600
+        game_x = (screen_width - game_width) // 2
+        game_y = (screen_height - game_height) // 2
+        
+        self.game_region = (game_x, game_y, game_width, game_height)
+        print(f"🎮 Default game region: {self.game_region}")
+        
+        # Ask user to adjust region if needed
+        self.adjust_game_region()
+    
+    def adjust_game_region(self):
+        """Allow user to adjust the game region."""
+        print("\n🎯 Game Region Setup:")
+        print("1. Open Fruit Ninja in a window")
+        print("2. Position it where you want to play")
+        print("3. Press Enter when ready")
+        
+        input("Press Enter to continue...")
+        
+        print("Click and drag to select the game area...")
+        print("Move mouse to top-left corner of game window, then press Enter")
+        input("Position mouse at top-left corner and press Enter...")
+        
+        top_left = pyautogui.position()
+        print(f"Top-left position: {top_left}")
+        
+        print("Now move mouse to bottom-right corner and press Enter")
+        input("Position mouse at bottom-right corner and press Enter...")
+        
+        bottom_right = pyautogui.position()
+        print(f"Bottom-right position: {bottom_right}")
+        
+        # Calculate region
+        x = min(top_left.x, bottom_right.x)
+        y = min(top_left.y, bottom_right.y)
+        width = abs(bottom_right.x - top_left.x)
+        height = abs(bottom_right.y - top_left.y)
+        
+        self.game_region = (x, y, width, height)
+        print(f"✅ Game region set to: {self.game_region}")
+        
+        # Confirm region
+        confirm = input("Use this region? (y/N): ").strip().lower()
+        if confirm not in ['y', 'yes']:
+            print("Using default region")
+            screen_width, screen_height = pyautogui.size()
+            game_width = DEFAULT_GAME_WIDTH if 'DEFAULT_GAME_WIDTH' in locals() else 800
+            game_height = DEFAULT_GAME_HEIGHT if 'DEFAULT_GAME_HEIGHT' in locals() else 600
+            game_x = (screen_width - game_width) // 2
+            game_y = (screen_height - game_height) // 2
+            self.game_region = (game_x, game_y, game_width, game_height)
+    
+    def capture_game_screen(self):
+        """Capture the game screen region."""
+        try:
+            screenshot = pyautogui.screenshot(region=self.game_region)
+            frame = np.array(screenshot)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            return frame
+        except Exception as e:
+            if VERBOSE_LOGGING:
+                print(f"❌ Error capturing screen: {e}")
+            return None
+    
+    def detect_fruits(self, frame):
+        """Detect fruits in the frame using YOLO."""
+        try:
+            results = self.model(frame, verbose=False, conf=self.confidence_threshold)
+            detections = []
+            
+            for result in results:
+                if result.boxes is not None:
+                    for box in result.boxes:
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        conf = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        
+                        detections.append({
+                            'bbox': (x1, y1, x2, y2),
+                            'confidence': conf,
+                            'class': cls,
+                            'center': ((x1 + x2) // 2, (y1 + y2) // 2)
+                        })
+            
+            if VERBOSE_LOGGING and detections:
+                print(f"🍎 Detected {len(detections)} fruits")
+            
+            return detections
+            
+        except Exception as e:
+            if VERBOSE_LOGGING:
+                print(f"❌ Error in fruit detection: {e}")
+            return []
+    
+    def slice_fruit(self, detection):
+        """Perform a slicing motion on the detected fruit."""
+        try:
+            x1, y1, x2, y2 = detection['bbox']
+            center_x, center_y = detection['center']
+            
+            # Convert relative coordinates to absolute screen coordinates
+            abs_center_x = self.game_region[0] + center_x
+            abs_center_y = self.game_region[1] + center_y
+            
+            # Calculate slice endpoints (diagonal slice)
+            slice_start_x = abs_center_x - SLICE_DISTANCE
+            slice_start_y = abs_center_y - SLICE_DISTANCE
+            slice_end_x = abs_center_x + SLICE_DISTANCE
+            slice_end_y = abs_center_y + SLICE_DISTANCE
+            
+            # Perform the slice motion
+            pyautogui.moveTo(slice_start_x, slice_start_y, duration=MOUSE_MOVE_DURATION)
+            pyautogui.dragTo(slice_end_x, slice_end_y, duration=MOUSE_DRAG_DURATION, button='left')
+            
+            print(f"🍎 Sliced fruit at ({center_x}, {center_y}) with confidence: {detection['confidence']:.2f}")
+            
+        except Exception as e:
+            print(f"❌ Error slicing fruit: {e}")
+    
+    def auto_play_loop(self):
+        """Main auto-play loop."""
+        print("🎮 Starting auto-play mode...")
+        print("Press 'q' to quit, move mouse to corner to stop")
+        
+        frame_count = 0
+        start_time = time.time()
+        
+        while self.is_running:
+            try:
+                # Capture game screen
+                frame = self.capture_game_screen()
+                if frame is None:
+                    continue
+                
+                # Detect fruits
+                detections = self.detect_fruits(frame)
+                
+                # Process detections
+                current_time = time.time()
+                for detection in detections:
+                    # Check if enough time has passed since last detection
+                    if current_time - self.last_detection_time > self.min_detection_interval:
+                        self.slice_fruit(detection)
+                        self.last_detection_time = current_time
+                
+                # Display frame with detections (optional, for debugging)
+                if SHOW_DEBUG_WINDOW and frame_count % FRAME_DISPLAY_INTERVAL == 0:
+                    self.display_debug_frame(frame, detections)
+                
+                frame_count += 1
+                
+                # Small delay to prevent excessive CPU usage
+                time.sleep(SCREEN_CAPTURE_DELAY)
+                
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print(f"❌ Error in auto-play loop: {e}")
+                time.sleep(0.1)
+        
+        print("🛑 Auto-play stopped")
+    
+    def display_debug_frame(self, frame, detections):
+        """Display frame with detection overlays for debugging."""
+        debug_frame = frame.copy()
+        
+        for detection in detections:
+            x1, y1, x2, y2 = detection['bbox']
+            conf = detection['confidence']
+            
+            # Color based on confidence
+            if conf > 0.7:
+                color = (0, 255, 0)  # Green for high confidence
+            elif conf > 0.4:
+                color = (0, 255, 255)  # Yellow for medium confidence
+            else:
+                color = (0, 0, 255)  # Red for low confidence
+            
+            # Draw bounding box
+            cv2.rectangle(debug_frame, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw confidence text
+            text = f"{conf:.2f}"
+            cv2.putText(debug_frame, text, (x1, y1-10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        
+        # Show frame
+        cv2.imshow("Fruit Detection Debug", debug_frame)
+        cv2.waitKey(1)
+    
+    def start_auto_play(self):
+        """Start the auto-play system."""
+        self.is_running = True
+        
+        # Start auto-play in a separate thread
+        auto_play_thread = threading.Thread(target=self.auto_play_loop)
+        auto_play_thread.daemon = True
+        auto_play_thread.start()
+        
+        print("🎮 Auto-play started! Press 'q' to quit")
+        
+        # Main loop for user input
+        try:
+            while True:
+                key = input().strip().lower()
+                if key == 'q':
+                    break
+                elif key == 'h':
+                    print("🎮 Commands:")
+                    print("  q - Quit")
+                    print("  h - Show this help")
+                    print("  s - Stop auto-play")
+                    print("  r - Resume auto-play")
+                elif key == 's':
+                    self.is_running = False
+                    print("⏸️ Auto-play paused")
+                elif key == 'r':
+                    self.is_running = True
+                    print("▶️ Auto-play resumed")
+                    
+        except KeyboardInterrupt:
+            pass
+        
+        # Cleanup
+        self.is_running = False
+        cv2.destroyAllWindows()
+        print("👋 Goodbye!")
 
-    # Run YOLO inference
-    results = model(frame)
+def main():
+    """Main function."""
+    print("🍎 Fruit Ninja AI Auto-Player")
+    print("=" * 40)
+    
+    try:
+        # Create and start the AI player
+        ai_player = FruitNinjaAI()
+        ai_player.start_auto_play()
+        
+    except Exception as e:
+        print(f"❌ Fatal error: {e}")
+        sys.exit(1)
 
-    # Process detections
-    for result in results:
-        for box in result.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])  # Bounding box coordinates
-            conf = box.conf[0]  # Confidence score
-            cls = int(box.cls[0])  # Class ID
-
-            if conf > 0.5:  # Check if confidence is greater than 50%
-                # Calculate the center of the bounding box
-                center_x = (x1 + x2) // 2
-                center_y = (y1 + y2) // 2
-
-                # Move the mouse to the center of the bounding box
-                pyautogui.moveTo(region[0] + center_x, region[1] + center_y, duration=0.1)
-
-                # Simulate a slicing motion
-                pyautogui.dragTo(region[0] + x2, region[1] + y2, duration=0.2, button='left')
-
-    # Display the frame
-    cv2.imshow("Game Detection", frame)
-
-    # Break the loop on 'q' key press
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-# Release resources
-cv2.destroyAllWindows()
+if __name__ == "__main__":
+    main()
