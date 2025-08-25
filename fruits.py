@@ -34,6 +34,92 @@ except ImportError:
 pyautogui.FAILSAFE = ENABLE_FAILSAFE if 'ENABLE_FAILSAFE' in locals() else True
 pyautogui.PAUSE = MOUSE_PAUSE if 'MOUSE_PAUSE' in locals() else 0.01
 
+class HotkeyManager:
+    """Manages global hotkeys for the application."""
+    
+    def __init__(self):
+        self.is_active = False
+        self.command_pressed = False
+        self.four_pressed = False
+        self.s_pressed = False
+        self.hotkey_thread = None
+        
+    def start_monitoring(self):
+        """Start monitoring for hotkeys in a separate thread."""
+        self.hotkey_thread = threading.Thread(target=self._monitor_hotkeys, daemon=True)
+        self.hotkey_thread.start()
+        print("⌨️ Hotkey monitoring started: Press Cmd+4+S to toggle auto-play")
+    
+    def _monitor_hotkeys(self):
+        """Monitor for hotkey combinations."""
+        try:
+            from pynput import keyboard
+            
+            def on_press(key):
+                try:
+                    # Check for Command key (meta key on macOS)
+                    if key == keyboard.Key.cmd or key == keyboard.Key.cmd_l or key == keyboard.Key.cmd_r:
+                        self.command_pressed = True
+                    # Check for 4 key
+                    elif hasattr(key, 'char') and key.char == '4':
+                        self.four_pressed = True
+                    # Check for S key
+                    elif hasattr(key, 'char') and key.char.lower() == 's':
+                        self.s_pressed = True
+                    
+                    # Check if hotkey combination is complete
+                    if self.command_pressed and self.four_pressed and self.s_pressed:
+                        self.is_active = not self.is_active
+                        status = "ACTIVATED" if self.is_active else "DEACTIVATED"
+                        print(f"\n🎯 Auto-play {status} by hotkey!")
+                        
+                        # Reset key states
+                        self.command_pressed = False
+                        self.four_pressed = False
+                        self.s_pressed = False
+                        
+                except AttributeError:
+                    pass
+            
+            def on_release(key):
+                try:
+                    # Reset key states when keys are released
+                    if key == keyboard.Key.cmd or key == keyboard.Key.cmd_l or key == keyboard.Key.cmd_r:
+                        self.command_pressed = False
+                    elif hasattr(key, 'char') and key.char == '4':
+                        self.four_pressed = False
+                    elif hasattr(key, 'char') and key.char.lower() == 's':
+                        self.s_pressed = False
+                except AttributeError:
+                    pass
+            
+            # Start listening for key events
+            with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+                listener.join()
+                
+        except ImportError:
+            print("⚠️ pynput not available, using fallback hotkey system")
+            print("Install with: pip3 install pynput")
+            self._fallback_hotkey_monitoring()
+    
+    def _fallback_hotkey_monitoring(self):
+        """Fallback hotkey monitoring using input() for when pynput is not available."""
+        def fallback_thread():
+            while True:
+                try:
+                    key = input("Press 't' + Enter to toggle auto-play, 'q' + Enter to quit: ").strip().lower()
+                    if key == 't':
+                        self.is_active = not self.is_active
+                        status = "ACTIVATED" if self.is_active else "DEACTIVATED"
+                        print(f"🎯 Auto-play {status}!")
+                    elif key == 'q':
+                        break
+                except (EOFError, KeyboardInterrupt):
+                    break
+        
+        fallback_thread = threading.Thread(target=fallback_thread, daemon=True)
+        fallback_thread.start()
+
 class FruitNinjaAI:
     def __init__(self):
         self.model = None
@@ -42,6 +128,9 @@ class FruitNinjaAI:
         self.confidence_threshold = CONFIDENCE_THRESHOLD
         self.last_detection_time = 0
         self.min_detection_interval = MIN_DETECTION_INTERVAL
+        
+        # Initialize hotkey manager
+        self.hotkey_manager = HotkeyManager()
         
         # Load the trained model
         self.load_model()
@@ -196,14 +285,20 @@ class FruitNinjaAI:
     
     def auto_play_loop(self):
         """Main auto-play loop."""
-        print("🎮 Starting auto-play mode...")
-        print("Press 'q' to quit, move mouse to corner to stop")
+        print("🎮 Auto-play system ready!")
+        print("Press Cmd+4+S to toggle auto-play on/off")
+        print("Move mouse to corner to stop completely")
         
         frame_count = 0
         start_time = time.time()
         
         while self.is_running:
             try:
+                # Check if hotkey has activated auto-play
+                if not self.hotkey_manager.is_active:
+                    time.sleep(0.1)
+                    continue
+                
                 # Capture game screen
                 frame = self.capture_game_screen()
                 if frame is None:
@@ -269,31 +364,24 @@ class FruitNinjaAI:
         """Start the auto-play system."""
         self.is_running = True
         
+        # Start hotkey monitoring
+        self.hotkey_manager.start_monitoring()
+        
         # Start auto-play in a separate thread
         auto_play_thread = threading.Thread(target=self.auto_play_loop)
         auto_play_thread.daemon = True
         auto_play_thread.start()
         
-        print("🎮 Auto-play started! Press 'q' to quit")
+        print("🎮 Auto-play system started!")
+        print("Commands:")
+        print("  Cmd+4+S - Toggle auto-play on/off")
+        print("  Move mouse to corner - Stop completely")
+        print("  Ctrl+C - Quit program")
         
         # Main loop for user input
         try:
             while True:
-                key = input().strip().lower()
-                if key == 'q':
-                    break
-                elif key == 'h':
-                    print("🎮 Commands:")
-                    print("  q - Quit")
-                    print("  h - Show this help")
-                    print("  s - Stop auto-play")
-                    print("  r - Resume auto-play")
-                elif key == 's':
-                    self.is_running = False
-                    print("⏸️ Auto-play paused")
-                elif key == 'r':
-                    self.is_running = True
-                    print("▶️ Auto-play resumed")
+                time.sleep(0.1)  # Keep main thread alive
                     
         except KeyboardInterrupt:
             pass
@@ -305,8 +393,8 @@ class FruitNinjaAI:
 
 def main():
     """Main function."""
-    print("🍎 Fruit Ninja AI Auto-Player")
-    print("=" * 40)
+    print("🍎 Fruit Ninja AI Auto-Player with Hotkey Control")
+    print("=" * 50)
     
     try:
         # Create and start the AI player
