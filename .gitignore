@@ -239,3 +239,47 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+
+# Machine Learning / YOLO Training
+runs/
+*.pt
+*.pth
+*.weights
+*.onnx
+*.engine
+*.trt
+*.mlmodel
+*.tflite
+*.pb
+*.savedmodel
+*.h5
+*.hdf5
+*.ckpt
+*.pkl
+*.joblib
+
+# Dataset and cache files
+dataset/
+labels/
+*.cache
+*.db
+*.sqlite
+*.sqlite3
+
+# Training logs and outputs
+wandb/
+mlruns/
+tensorboard_logs/
+lightning_logs/
+logs/
+*.log
+*.csv
+*.json
+*.yaml
+*.yml
+
+# Model checkpoints and artifacts
+checkpoints/
+artifacts/
+models/
+saved_models/
