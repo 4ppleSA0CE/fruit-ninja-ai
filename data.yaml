@@ -1,0 +1,21 @@
+path: ./dataset
+train: train/images
+val: val/images
+names:
+  0: Banana
+  1: class_1
+  2: Cherry
+  3: class_3
+  4: Coconut
+  5: Dragon_Fruit
+  6: Green_Apple
+  7: Kiwi
+  8: Lemon
+  9: Lime
+  10: Mango
+  11: Orange
+  12: Passion_Fruit
+  13: Peach
+  14: Pear
+  15: class_15
+nc: 16

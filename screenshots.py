@@ -4,7 +4,7 @@ import os
 from pynput import keyboard
 
 # Define folder path
-outputdir = os.path.join(os.path.expanduser('~'), "Documents", "fruitnin", "screenshots")
+outputdir = os.path.join(os.path.expanduser('~'), "Documents", "fruit-ninja-ai", "screenshots")
 os.makedirs(outputdir, exist_ok=True)
 
 taking_screenshots = False
