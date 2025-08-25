@@ -2,6 +2,7 @@
 """
 Fruit Detection YOLO Training Script
 This script will train a YOLO model on your fruit dataset.
+Windows-compatible version.
 """
 
 import os
@@ -113,11 +114,9 @@ def update_data_yaml():
     return True
 
 def get_best_device():
-    """Get the best available device for training."""
+    """Get the best available device for training on Windows."""
     if torch.cuda.is_available():
         return 'cuda'
-    elif torch.backends.mps.is_available():
-        return 'mps'
     else:
         return 'cpu'
 
@@ -132,8 +131,15 @@ def train_model(model_size='n', epochs=100):
     
     print(f"🚀 Starting training with YOLOv11{model_size} for {epochs} epochs...")
     
-    # Detect best device
-    device = get_best_device()
+    # Force GPU usage for training
+    if torch.cuda.is_available():
+        device = 'cuda'
+        print(f"🔧 GPU detected: {torch.cuda.get_device_name(0)}")
+        print(f"🔧 GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+    else:
+        device = 'cpu'
+        print("⚠️ No GPU detected, using CPU (training will be slower)")
+    
     print(f"🔧 Using device: {device.upper()}")
     
     # Load model
@@ -142,24 +148,50 @@ def train_model(model_size='n', epochs=100):
     
     try:
         model = YOLO(model_name)
+        
+        # Verify model is on the correct device
+        if device == 'cuda':
+            # Force model to GPU
+            model.to('cuda')
+            print(f"✅ Model loaded on GPU: {torch.cuda.get_device_name(0)}")
+        else:
+            print("✅ Model loaded on CPU")
+            
     except Exception as e:
         print(f"❌ Error loading model: {e}")
         print("Make sure you have internet connection to download the model.")
         return False
     
-    # Training configuration
+    # GPU-optimized training configuration for YOLOv11
+    if device == 'cuda':
+        # Optimize for GPU
+        batch_size = 32
+        workers = 8
+        cache = True
+        amp = True
+        half = True
+        print(f"🚀 GPU training configuration: batch={batch_size}, workers={workers}")
+    else:
+        # Optimize for CPU
+        batch_size = 8
+        workers = 0
+        cache = False
+        amp = False
+        half = False
+        print(f"🐌 CPU training configuration: batch={batch_size}, workers={workers}")
+    
     train_config = {
-        'data': 'data.yaml',
+        'data': str(Path('data.yaml').absolute()),  # Use absolute path
         'epochs': epochs,
-        'batch': 8,  # Reduced for MPS memory optimization
+        'batch': batch_size,
         'imgsz': 640,
         'name': f'fruit_detection_v11{model_size}',
-        'device': device,  # Use detected best device
+        'device': device,
         'patience': 20,  # Early stopping
         'save': True,
         'save_period': 10,
-        'cache': False,
-        'workers': 4,  # Reduced for MPS
+        'cache': cache,
+        'workers': workers,
         'project': 'runs',
         'exist_ok': True,
         'pretrained': True,
@@ -167,12 +199,12 @@ def train_model(model_size='n', epochs=100):
         'verbose': True,
         'seed': 42,
         'deterministic': True,
-        'single_cls': False,  # Set to False if you have multiple classes
+        'single_cls': False,
         'rect': False,
         'cos_lr': False,
         'close_mosaic': 10,
         'resume': False,
-        'amp': False,  # Disabled for MPS compatibility
+        'amp': amp,
         'fraction': 1.0,
         'profile': False,
         'freeze': None,
@@ -206,9 +238,8 @@ def train_model(model_size='n', epochs=100):
         'conf': 0.001,
         'iou': 0.6,
         'max_det': 300,
-        'half': False,  # Disabled for MPS compatibility
+        'half': half,
         'dnn': False,
-        'plots': True,
         'source': None,
         'vid_stride': 1,
         'line_thickness': 3,
@@ -238,20 +269,53 @@ def train_model(model_size='n', epochs=100):
         print(f"   Precision: {metrics.box.mp:.3f}")
         print(f"   Recall: {metrics.box.mr:.3f}")
         
-        # Save the trained model
-        model_path = f"best_fruit_detection_v8{model_size}.pt"
-        model.export(format="torchscript")
-        print(f"💾 Model exported to: {model_path}")
+        # Save the trained model with proper Windows path handling
+        model_save_dir = Path("trained_models")
+        model_save_dir.mkdir(exist_ok=True)
+        
+        # Save the best model
+        best_model_path = model_save_dir / f"best_fruit_detection_v11{model_size}.pt"
+        if hasattr(results, 'save_dir') and results.save_dir:
+            best_model_source = Path(results.save_dir) / "weights" / "best.pt"
+            if best_model_source.exists():
+                import shutil
+                shutil.copy2(best_model_source, best_model_path)
+                print(f"💾 Best model saved to: {best_model_path}")
+            else:
+                print("⚠️ Best model weights not found, saving current model")
+                model.save(best_model_path)
+        else:
+            model.save(best_model_path)
+            print(f"💾 Model saved to: {best_model_path}")
+        
+        # Export to different formats for Windows compatibility
+        try:
+            # Export to ONNX for Windows deployment
+            onnx_path = model_save_dir / f"best_fruit_detection_v11{model_size}.onnx"
+            model.export(format="onnx", imgsz=640)
+            print(f"💾 Model exported to ONNX: {onnx_path}")
+        except Exception as e:
+            print(f"⚠️ ONNX export failed: {e}")
+        
+        try:
+            # Export to TorchScript for Windows deployment
+            torchscript_path = model_save_dir / f"best_fruit_detection_v11{model_size}.torchscript"
+            model.export(format="torchscript", imgsz=640)
+            print(f"💾 Model exported to TorchScript: {torchscript_path}")
+        except Exception as e:
+            print(f"⚠️ TorchScript export failed: {e}")
         
         return True
         
     except Exception as e:
         print(f"❌ Training failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def main():
     """Main training workflow."""
-    print("🍎 Fruit Detection YOLO Training")
+    print("🍎 Fruit Detection YOLO Training (Windows)")
     print("=" * 50)
     
     # Check dataset
@@ -279,7 +343,7 @@ def main():
         model_size = 'n'
     
     print(f"\n🎯 Training Configuration:")
-    print(f"   Model: YOLOv8{model_size}")
+    print(f"   Model: YOLOv11{model_size}")
     print(f"   Epochs: {epochs}")
     print(f"   Dataset: {Path('dataset').absolute()}")
     
@@ -299,6 +363,7 @@ def main():
         print("1. Update fruits.py with the path to your trained model")
         print("2. Test the model on new images")
         print("3. Fine-tune if needed")
+        print(f"\n📁 Models saved in: {Path('trained_models').absolute()}")
     else:
         print("\n❌ Training failed. Check the error messages above.")
         sys.exit(1)
