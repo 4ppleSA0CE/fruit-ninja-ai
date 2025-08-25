@@ -166,6 +166,7 @@ class FruitDetectionDemo:
         print(f"✅ Demo region set to: {demo_region}")
         
         print("\n🚀 Starting demo... Press 'q' to quit")
+        print("💡 If 'q' doesn't work, try clicking on the demo window first, or press Ctrl+C")
         
         frame_count = 0
         start_time = time.time()
@@ -186,18 +187,32 @@ class FruitDetectionDemo:
                 display_frame = self.display_detection_frame(frame, detections)
                 
                 # Show frame
-                cv2.imshow("Fruit Detection Demo", display_frame)
+                cv2.imshow("Fruit Detection Demo - Press 'q' to quit, 's' to save", display_frame)
                 
-                # Handle key presses
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
+                # Ensure window gets focus on Windows
+                if frame_count == 0:
+                    cv2.setWindowProperty("Fruit Detection Demo - Press 'q' to quit, 's' to save", cv2.WND_PROP_TOPMOST, 1)
+                    print("💡 Demo window opened! Click on it to give it focus, then press 'q' to quit")
+                
+                # Handle key presses - increased delay for better Windows compatibility
+                key = cv2.waitKey(30) & 0xFF  # Increased from 1ms to 30ms
+                
+                # Debug key presses
+                if key != 255:  # 255 means no key pressed
+                    print(f"🔑 Key pressed: {chr(key) if 32 <= key <= 126 else key}")
+                
+                if key == ord('q') or key == ord('Q'):
+                    print("🔄 Quit command received, stopping demo...")
                     break
-                elif key == ord('s'):
+                elif key == ord('s') or key == ord('S'):
                     # Save current frame
                     timestamp = int(time.time())
                     filename = f"demo_frame_{timestamp}.png"
                     cv2.imwrite(filename, display_frame)
                     print(f"💾 Saved frame as: {filename}")
+                elif key == 27:  # ESC key
+                    print("🔄 ESC key pressed, stopping demo...")
+                    break
                 
                 frame_count += 1
                 
